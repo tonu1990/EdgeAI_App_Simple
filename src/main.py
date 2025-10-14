@@ -37,6 +37,7 @@ logger.info("Elements/Widgets - Buttons loaded")
 logger.info("Initial App View fully Loaded . Rady for next steps ")
 
 # STEP 4: Define button action
+
 def on_preview_button_clicked():
     if preview_button.text()== "Start Cam Preview" :
         preview_button.setText("Stop Cam Preview")
@@ -48,15 +49,22 @@ def on_preview_button_clicked():
         detect_button.setEnabled(True)
         logger.info("Detection button enabled. Ready for detection") 
 
-    else :
+    else : # when Stop preview clicked flip text, also disable and reset Object det button
         label.setText("Welcome to Tonu Edge AI")
         logger.info("App set to Initial App View. Ready for preview")
-        preview_button.setText("Start Cam Preview")    
+        preview_button.setText("Start Cam Preview") 
+
+        detect_button.setText("Start Object Detection")
         detect_button.setEnabled(False)    
         logger.info("Detection button disabled")
 
 def on_detection_button_clicked():
-    detect_button.setText("Stop Object detection")
+    if detect_button.text()=="Start Object Detection" :
+        detect_button.setText("Stop Object detection")
+        logger.info("Object detection starting")
+    else :
+        detect_button.setText("Start Object Detection")
+        logger.info("Object detection stopping")
     
 
 # STEP 5: Connect button to action
