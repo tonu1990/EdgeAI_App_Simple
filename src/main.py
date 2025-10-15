@@ -22,11 +22,11 @@ logger.info("Application started")
 
 # STEP 2: Create the main window container
 window = QWidget()
+window.resize(800, 600)
 window.setWindowTitle("Camera App")  # Optional: Change the title
 logger.info("Main window created")
 
 # STEP 3: Create widgets
-label = QLabel("Welcome to Tonu Edge AI")
 
 # Buttons . At start keep Object detetcion button disabled
 preview_button = QPushButton('Start Cam Preview')
@@ -43,14 +43,14 @@ def on_preview_button_clicked():
         preview_button.setText("Stop Cam Preview")
 
         # change logic here 
-        label.setText("Camera Preview starting")
+ 
         logger.info("App in Preview Mode")        
 
         detect_button.setEnabled(True)
         logger.info("Detection button enabled. Ready for detection") 
 
     else : # when Stop preview clicked flip text, also disable and reset Object det button
-        label.setText("Welcome to Tonu Edge AI")
+ 
         logger.info("App set to Initial App View. Ready for preview")
         preview_button.setText("Start Cam Preview") 
 
@@ -60,7 +60,7 @@ def on_preview_button_clicked():
 
 def on_detection_button_clicked():
     if detect_button.text()=="Start Object Detection" :
-        detect_button.setText("Stop Object detection")
+        detect_button.setText("Stop Object Detection")
         logger.info("Object detection starting")
     else :
         detect_button.setText("Start Object Detection")
@@ -73,7 +73,6 @@ detect_button.clicked.connect(on_detection_button_clicked)
 
 # STEP 6: Create layout and add widgets
 layout = QVBoxLayout()
-layout.addWidget(label)
 layout.addWidget(preview_button)
 layout.addWidget(detect_button)
 
