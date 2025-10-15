@@ -1,9 +1,7 @@
-# STEP 1: Choose base image (like choosing a foundation for a house)
-# Using official Python image for ARM64 (Raspberry Pi architecture)
+# STEP 1: Choose base image
 FROM python:3.10-slim-bookworm
 
-# STEP 2: Install system dependencies needed for PySide6
-# These are like tools needed before building
+# STEP 2: Install system dependencies (INCLUDING EGL!)
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
@@ -18,9 +16,18 @@ RUN apt-get update && apt-get install -y \
     libdbus-1-3 \
     libxcb-cursor0 \
     libxcb-xfixes0 \
+    libegl1 \
+    libxkbcommon0 \
+    libxcb-glx0 \
+    libxcb-shm0 \
+    libxcb-sync1 \
+    libfontconfig1 \
+    libfreetype6 \
+    libx11-6 \
+    libx11-xcb1 \
     && rm -rf /var/lib/apt/lists/*
 
-# STEP 3: Set working directory (like creating a project folder)
+# STEP 3: Set working directory
 WORKDIR /app
 
 # STEP 4: Copy requirements file
@@ -32,7 +39,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # STEP 6: Copy your application code
 COPY src/ ./src/
 
-# STEP 7: Set display environment for GUI (allows window to show)
+# STEP 7: Set display environment
 ENV DISPLAY=:0
 
 # STEP 8: Command to run when container starts
