@@ -6,6 +6,7 @@ on:
     branches: [ main ]  # Run when you push to main branch
   pull_request:
     branches: [ main ]
+  workflow_dispatch:  # Enables manual trigger button!
 
 # What should it do?
 jobs:
