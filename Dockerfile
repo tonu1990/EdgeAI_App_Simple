@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libdbus-1-3 \
     # EGL and OpenGL
-    libegl1 \
+    # libegl1 \
     # Font rendering
     libfontconfig1 \
     libfreetype6 \
