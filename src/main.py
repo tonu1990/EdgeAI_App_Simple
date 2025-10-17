@@ -45,7 +45,7 @@ def on_preview_button_clicked():
         preview_button.setText("Stop Cam Preview")
 
         #Gstreamer part 
-        success = start_preview(camera_device="/dev/video0")
+        success = start_preview()
 
         if success : 
             logger.info("App in Preview Mode")     
