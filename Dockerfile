@@ -7,8 +7,8 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     libdbus-1-3 \
-    # EGL and OpenGL
-    libegl1 \
+    #  EGL interface for OpenGL - Raspberry Pi 5 has a GPU, but without libegl1, Qt can't use it
+    libegl1 \ 
     # Font rendering
     libfontconfig1 \
     libfreetype6 \
@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
     libxrender1 \
     libsm6 \
     libice6 \
-    # XCB base (CRITICAL - was missing!)
+    # XCB base
     libxcb1 \
     # XCB extensions
     libxcb-cursor0 \
@@ -39,6 +39,21 @@ RUN apt-get update && apt-get install -y \
     # Keyboard support
     libxkbcommon0 \
     libxkbcommon-x11-0 \
+    # GStreamer dependencies
+    gstreamer1.0-tools \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    gstreamer1.0-x \
+    libgstreamer1.0-0 \
+    libgstreamer-plugins-base1.0-0 \
+    python3-gi \
+    gir1.2-gst-rtsp-server-1.0 \
+    libgirepository1.0-dev \
+    # V4L2 for USB camera
+    v4l-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # STEP 3: Set working directory

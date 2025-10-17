@@ -1,6 +1,8 @@
 import sys
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from gstreamer_manager import start_preview
+
 ############## LOGGING ###############
 # Setup logging
 import logging
@@ -42,12 +44,13 @@ def on_preview_button_clicked():
     if preview_button.text()== "Start Cam Preview" :
         preview_button.setText("Stop Cam Preview")
 
-        # change logic here 
- 
-        logger.info("App in Preview Mode")        
+        #Gstreamer part 
+        success = start_preview(camera_device="/dev/video0")
 
-        detect_button.setEnabled(True)
-        logger.info("Detection button enabled. Ready for detection") 
+        if success : 
+            logger.info("App in Preview Mode")     
+            detect_button.setEnabled(True)
+            logger.info("Detection button enabled. Ready for detection") 
 
     else : # when Stop preview clicked flip text, also disable and reset Object det button
  
