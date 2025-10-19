@@ -2,11 +2,6 @@
 # Most portable - works on x86, ARM, any platform with Docker
 FROM python:3.11-slim
 
-# Metadata about the image
-LABEL maintainer="your-email@example.com"
-LABEL description="GStreamer Webcam Preview Application"
-LABEL version="1.0"
-
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
