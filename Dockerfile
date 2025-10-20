@@ -1,10 +1,5 @@
-# Use Debian 12 (Bookworm) as base image
-# This matches Raspberry Pi OS and has GStreamer readily available
+# Use Debian 12 (Bookworm) as base image- This matches Raspberry Pi OS and has GStreamer readily available
 FROM debian:bookworm-slim
-
-# Set metadata about the image
-LABEL maintainer="your-email@example.com"
-LABEL description="GStreamer Webcam Preview Application"
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
