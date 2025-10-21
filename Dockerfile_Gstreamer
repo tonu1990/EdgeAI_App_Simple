@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy the Python script into the container
-COPY src/webcam_preview.py .
+COPY src/webcam_flip.py .
 
 # Make the script executable
 RUN chmod +x webcam_flip.py
