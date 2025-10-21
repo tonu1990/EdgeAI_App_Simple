@@ -32,7 +32,8 @@ WORKDIR /app
 COPY src/webcam_preview.py .
 
 # Make the script executable
-RUN chmod +x webcam_preview.py
+RUN chmod +x webcam_flip.py.py
 
 # Set the command to run when container starts
-CMD ["python3", "src/webcam_preview.py"]
+CMD ["python3", "webcam_flip.py"]
+
