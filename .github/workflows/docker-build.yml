@@ -55,7 +55,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .                    # Build from project root
-          file: ./Dockerfile_Gstreamer_Preview            # Use this Dockerfile
+          file: ./Dockerfile_Gstreamer_Flip           # Use this Dockerfile
           platforms: linux/arm64        # Raspberry Pi 5 architecture
           push: true                    # Push to GHCR after building
           tags: ${{ steps.meta.outputs.tags }}
