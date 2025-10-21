@@ -35,4 +35,4 @@ COPY src/webcam_preview.py .
 RUN chmod +x webcam_preview.py
 
 # Set the command to run when container starts
-CMD ["python3", "webcam_flip.py"]
+CMD ["python3", "src/webcam_preview.py"]
