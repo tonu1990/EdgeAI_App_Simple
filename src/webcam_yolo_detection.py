@@ -53,8 +53,10 @@ DISPLAY_HEIGHT = 480
 FPS = 30
 
 # Detection settings
-DETECTION_WIDTH = 416       # Smaller = faster (416 or 640)
-DETECTION_HEIGHT = 416
+# Detection settings
+DETECTION_WIDTH = 640       # ← match model we are using ONNX converted YOLO
+DETECTION_HEIGHT = 640      # ← match model we are using ONNX converted YOLO
+
 CONF_THRESHOLD = 0.5        # Minimum confidence (0.0-1.0)
 NMS_THRESHOLD = 0.45        # NMS IoU threshold
 
