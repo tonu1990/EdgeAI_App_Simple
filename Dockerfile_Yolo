@@ -1,6 +1,7 @@
 # ============================================
 # YOLO Object Detection Docker Image
 # Base: Debian 12 (Bookworm) - matches Raspberry Pi OS
+# Optimized for Raspberry Pi 5 ARM64
 # ============================================
 
 FROM debian:bookworm-slim
@@ -27,6 +28,12 @@ RUN apt-get update && apt-get install -y \
     gir1.2-gstreamer-1.0 \
     gir1.2-gst-plugins-base-1.0 \
     \
+    # NumPy (system package, pre-compiled for ARM)
+    python3-numpy \
+    \
+    # OpenCV (system package, includes NMS functionality)
+    python3-opencv \
+    \
     # Cairo for drawing
     libcairo2 \
     \
@@ -34,9 +41,9 @@ RUN apt-get update && apt-get install -y \
     libx11-6 \
     libxv1 \
     \
-    # OpenCV dependencies (needed for cv2.dnn.NMSBoxes)
-    libopencv-dev \
-    python3-opencv \
+    # Build tools (needed for pip packages)
+    python3-dev \
+    build-essential \
     \
     # Clean up to reduce image size
     && apt-get clean \
@@ -48,13 +55,15 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # ============================================
-# INSTALL PYTHON PACKAGES
+# INSTALL PYTHON PACKAGES VIA PIP
 # ============================================
 # Copy requirements first (Docker layer caching optimization)
 COPY requirements.txt .
 
 # Install Python packages
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Use --break-system-packages for Debian 12 (PEP 668 compliance)
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt || \
+    pip3 install --no-cache-dir -r requirements.txt
 
 # ============================================
 # COPY APPLICATION CODE
