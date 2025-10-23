@@ -1,1 +1,13 @@
-PySide6
+# Python packages to install via pip
+# These are not available in Debian repositories or need specific versions
+
+# ONNX Runtime - Run ONNX machine learning models
+# Version 1.16.0 is stable and works well on Raspberry Pi 5
+onnxruntime==1.16.0
+
+# NumPy - Array processing (also installed via apt, but this ensures compatibility)
+numpy>=1.24.0
+
+# OpenCV (headless version - no GUI, smaller size)
+# Used for Non-Maximum Suppression (NMS) - removing duplicate boxes
+opencv-python-headless>=4.8.0
