@@ -29,10 +29,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy the Python script into the container
-COPY src/webcam_preview.py .
-
-# Make the script executable
-RUN chmod +x webcam_preview.py
+COPY src/Yolo_Detection_self.py .
 
 # Set the command to run when container starts
 CMD ["python3", "Yolo_Detection_self.py"]
