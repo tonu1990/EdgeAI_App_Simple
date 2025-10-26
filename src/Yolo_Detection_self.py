@@ -1,3 +1,4 @@
+import sys
 import gi
 gi.require_version('Gst' , '1.0')
 from gi.repository import Gst, GLib
@@ -5,17 +6,20 @@ from gi.repository import Gst, GLib
 def main():
 
     pipeline_str = ( "v4l2src device=/dev/video0 ! " 
-                    "image/jpeg,width=640,height=480,framerate=30/1 !" 
-                    "jpegdec !"
+                    "image/jpeg,width=640,height=480,framerate=30/1 ! " 
+                    "jpegdec ! "
                     "xvimagesink" )
 
     print("starting Gstreamer pipeline ")
+
+    # Initialize GStreamer
+    Gst.init(None)
 
     # create pipeline from String
     pipeline = Gst.parse_launch(pipeline_str)
 
     #start Playing
-    pipeline.set_state(Gst.state.PLAYING)
+    pipeline.set_state(Gst.State.PLAYING)
     print("Pipeline started Playing")
 
     # create a Main loop for running Pipeline 
@@ -26,8 +30,8 @@ def main():
     except KeyboardInterrupt:
             print("\n\nReceived interrupt signal. Stopping pipeline...")
 
-    pipeline.set_state(Gst.state.NULL)
+    pipeline.set_state(Gst.State.NULL)
     print("Pipeline stopped..")
 
 if __name__ == "__main__" :
-     main()
+     sys.exit(main())
