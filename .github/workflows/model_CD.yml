@@ -1,0 +1,486 @@
+name: Model CD - Deploy Model (.ONNX) and labels.json to Pi
+
+on:
+  workflow_dispatch:
+    inputs:
+      model-source:
+        description: >
+          "GithubRelease" to deploy from a GitHub Release;
+          "GithubRepo" to upload .onnx/.json to Releases, then deploy
+        type: choice
+        required: true
+        default: GithubRelease
+        options:
+          - GithubRelease
+          - GithubRepo
+      release-version:
+        description: 'GitHub Release tag (ignored in GithubRepo mode). Use "latest" or a tag like model-YYYYMMDD-HHMM-<shortsha>'
+        required: false
+        default: 'latest'
+      pi-project-dir:
+        description: 'Project directory on Pi under /opt/edge/. Leave empty to use repo name'
+        required: false
+        default: ''
+      artifact_glob:
+        description: >
+          (GithubRepo mode) Directory path containing your artifacts (e.g., Model_dev/artifacts).
+          Directory must contain exactly one .onnx; an optional labels.json (or first *.json) will be uploaded/deployed.
+        required: false
+        default: Model_dev/artifacts
+
+permissions:
+  contents: write
+
+concurrency:
+  group: model-cd
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Prepare (upload/find) release assets and build bundle
+    runs-on: ubuntu-latest
+    outputs:
+      pi_project_name: ${{ steps.repo-config.outputs.pi_project_name }}
+      source_tag:      ${{ steps.outputs-bridge.outputs.source_tag }}
+      model_asset:     ${{ steps.outputs-bridge.outputs.model_asset }}
+      labels_asset:    ${{ steps.outputs-bridge.outputs.labels_asset }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure project name
+        id: repo-config
+        shell: bash
+        run: |
+          if [ -z "${{ github.event.inputs.pi-project-dir }}" ]; then
+            PI_PROJECT_NAME="${{ github.event.repository.name }}"
+          else
+            PI_PROJECT_NAME="${{ github.event.inputs.pi-project-dir }}"
+          fi
+          PI_PROJECT_NAME=$(echo "$PI_PROJECT_NAME" | sed 's/[./]//g')
+          echo "pi_project_name=$PI_PROJECT_NAME" >> $GITHUB_OUTPUT
+          echo "Using Pi project dir: $PI_PROJECT_NAME"
+
+      # ---------------------------
+      # GithubRepo MODE
+      # ---------------------------
+      - name: Find local artifacts (GithubRepo)
+        id: find-local
+        if: ${{ github.event.inputs.model-source == 'GithubRepo' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ART_DIR="${{ github.event.inputs.artifact_glob }}"
+          echo "Artifact directory: $ART_DIR"
+          test -d "$ART_DIR" || { echo "❌ Not a directory: $ART_DIR"; exit 1; }
+
+          mapfile -t onnx_files < <(find "$ART_DIR" -maxdepth 1 -type f -name '*.onnx' | sort)
+          if [ "${#onnx_files[@]}" -eq 0 ]; then
+            echo "❌ No .onnx in $ART_DIR"; exit 1
+          fi
+          if [ "${#onnx_files[@]}" -gt 1 ]; then
+            echo "❌ Multiple .onnx found:"; printf ' - %s\n' "${onnx_files[@]}"; exit 1
+          fi
+
+          MODEL_LOCAL="${onnx_files[0]}"
+          echo "MODEL_LOCAL=$MODEL_LOCAL" >> $GITHUB_ENV
+          echo "Selected ONNX: $MODEL_LOCAL"
+
+          LABELS_LOCAL=""
+          if [ -f "$ART_DIR/labels.json" ]; then
+            LABELS_LOCAL="$ART_DIR/labels.json"
+          else
+            mapfile -t json_files < <(find "$ART_DIR" -maxdepth 1 -type f -name '*.json' | sort)
+            if [ "${#json_files[@]}" -ge 1 ]; then
+              LABELS_LOCAL="${json_files[0]}"
+            fi
+          fi
+          if [ -n "$LABELS_LOCAL" ]; then
+            echo "LABELS_LOCAL=$LABELS_LOCAL" >> $GITHUB_ENV
+            echo "Found labels: $LABELS_LOCAL"
+          else
+            echo "No labels.json found; proceeding without labels."
+          fi
+
+          cp "$MODEL_LOCAL" model.tmp.onnx
+          SHA=$(sha256sum model.tmp.onnx | cut -d' ' -f1)
+          SHORT=${SHA:0:12}
+          STAMP=$(date -u +%Y%m%d-%H%M)
+          echo "STAMP=$STAMP" >> $GITHUB_ENV
+          echo "SHORT=$SHORT" >> $GITHUB_ENV
+          echo "MODEL_SHA=$SHA" >> $GITHUB_ENV
+          echo "Computed SHORT=$SHORT STAMP=$STAMP"
+
+      - name: Upload assets to versioned and latest releases (GithubRepo)
+        id: upload-releases
+        if: ${{ github.event.inputs.model-source == 'GithubRepo' }}
+        uses: actions/github-script@v7
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          script: |
+            const fs = require('fs');
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+
+            const STAMP = process.env.STAMP;
+            const SHORT = process.env.SHORT;
+            const MODEL_PATH = 'model.tmp.onnx';
+            const MODEL_ASSET = `model-${STAMP}-${SHORT}.onnx`;
+
+            const HAS_LABELS = !!process.env.LABELS_LOCAL;
+            let LABELS_ASSET = null;
+            if (HAS_LABELS) {
+              fs.copyFileSync(process.env.LABELS_LOCAL, 'labels.tmp.json');
+              LABELS_ASSET = `labels-${STAMP}-${SHORT}.json`;
+            }
+
+            async function ensureRelease(tag, name) {
+              try {
+                const r = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+                return r.data;
+              } catch (e) {
+                if (e.status === 404) {
+                  const r = await github.rest.repos.createRelease({
+                    owner, repo, tag_name: tag, name, draft: false, prerelease: false
+                  });
+                  return r.data;
+                }
+                throw e;
+              }
+            }
+
+            // Create immutable versioned release
+            const versionTag = `model-${STAMP}-${SHORT}`;
+            const versionName = `Model ${STAMP} ${SHORT}`;
+            const ver = await ensureRelease(versionTag, versionName);
+
+            // Upload model to versioned
+            {
+              const stat = fs.statSync(MODEL_PATH);
+              const data = fs.readFileSync(MODEL_PATH);
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: ver.id, name: MODEL_ASSET, data,
+                headers: { 'content-type': 'application/octet-stream', 'content-length': stat.size }
+              });
+            }
+            // Upload labels (if any) to versioned
+            if (HAS_LABELS) {
+              const stat = fs.statSync('labels.tmp.json');
+              const data = fs.readFileSync('labels.tmp.json');
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: ver.id, name: LABELS_ASSET, data,
+                headers: { 'content-type': 'application/json', 'content-length': stat.size }
+              });
+            }
+
+            // Update the moving 'latest' release
+            const latest = await ensureRelease('latest', 'Latest Model');
+            const assets = (await github.rest.repos.listReleaseAssets({ owner, repo, release_id: latest.id })).data;
+            const toDelete = assets.filter(a => {
+              const n = (a.name || '').toLowerCase();
+              return n.endsWith('.onnx') || n.endsWith('.json');
+            });
+            for (const a of toDelete) {
+              await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: a.id });
+            }
+            // Upload fresh pair to 'latest'
+            {
+              const stat = fs.statSync(MODEL_PATH);
+              const data = fs.readFileSync(MODEL_PATH);
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: latest.id, name: MODEL_ASSET, data,
+                headers: { 'content-type': 'application/octet-stream', 'content-length': stat.size }
+              });
+            }
+            if (HAS_LABELS) {
+              const stat = fs.statSync('labels.tmp.json');
+              const data = fs.readFileSync('labels.tmp.json');
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: latest.id, name: LABELS_ASSET, data,
+                headers: { 'content-type': 'application/json', 'content-length': stat.size }
+              });
+            }
+
+            core.setOutput('version_tag', versionTag);
+            core.setOutput('latest_tag', 'latest');
+            core.setOutput('model_asset', MODEL_ASSET);
+            core.setOutput('labels_asset', LABELS_ASSET || '');
+            console.log(`Uploaded assets: ${MODEL_ASSET}${HAS_LABELS ? ' + ' + LABELS_ASSET : ''}`);
+
+      # ---------------------------
+      # GithubRelease MODE
+      # ---------------------------
+      - name: Resolve release and select assets (GithubRelease)
+        id: rel
+        if: ${{ github.event.inputs.model-source == 'GithubRelease' }}
+        uses: actions/github-script@v7
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          script: |
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+            const reqTag = '${{ github.event.inputs.release-version }}' || 'latest';
+            let rel;
+            if (reqTag === 'latest') {
+              rel = await github.rest.repos.getLatestRelease({ owner, repo });
+            } else {
+              rel = await github.rest.repos.getReleaseByTag({ owner, repo, tag: reqTag });
+            }
+            const assets = rel.data.assets || [];
+            const onnx = assets.find(a => a.name && a.name.toLowerCase().endsWith('.onnx'));
+            if (!onnx) {
+              core.setFailed(`No .onnx asset found in release ${rel.data.tag_name}`);
+              return;
+            }
+            const labels = assets.find(a => a.name && a.name.toLowerCase().endsWith('.json'));
+            core.setOutput('tag_name', rel.data.tag_name);
+            core.setOutput('model_asset_id', String(onnx.id));
+            core.setOutput('model_asset_name', onnx.name);
+            core.setOutput('labels_asset_id', labels ? String(labels.id) : '');
+            core.setOutput('labels_asset_name', labels ? labels.name : '');
+
+      # ---------------------------
+      # Common: download assets to bundle/
+      # ---------------------------
+      - name: Resolve asset IDs from versioned release (GithubRepo)
+        id: resolve-ids
+        if: ${{ github.event.inputs.model-source == 'GithubRepo' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+            const tag = '${{ steps.upload-releases.outputs.version_tag }}';
+            const modelName = '${{ steps.upload-releases.outputs.model_asset }}';
+            const labelsName = '${{ steps.upload-releases.outputs.labels_asset }}';
+            const rel = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+            const assets = rel.data.assets || [];
+            const model = assets.find(a => a.name === modelName);
+            if (!model) core.setFailed(`Model asset ${modelName} not found in ${tag}`);
+            core.setOutput('model_id', String(model.id));
+            const labels = assets.find(a => a.name === labelsName);
+            core.setOutput('labels_id', labels ? String(labels.id) : '');
+
+      - name: Download assets (GithubRepo)
+        id: download-repo
+        if: ${{ github.event.inputs.model-source == 'GithubRepo' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO='${{ github.repository }}'
+          TAG='${{ steps.upload-releases.outputs.version_tag }}'
+          MODEL_ASSET='${{ steps.upload-releases.outputs.model_asset }}'
+          MODEL_ID='${{ steps.resolve-ids.outputs.model_id }}'
+          LABELS_ASSET='${{ steps.upload-releases.outputs.labels_asset }}'
+          LABELS_ID='${{ steps.resolve-ids.outputs.labels_id }}'
+
+          mkdir -p bundle
+          echo "Downloading from release: $TAG"
+
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+            -o "bundle/$MODEL_ASSET" \
+            "https://api.github.com/repos/${REPO}/releases/assets/${MODEL_ID}"
+
+          if [ -n "$LABELS_ID" ]; then
+            curl -sSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+              -o "bundle/$LABELS_ASSET" \
+              "https://api.github.com/repos/${REPO}/releases/assets/${LABELS_ID}"
+          else
+            echo "⚠️ No labels.json asset in this release (lenient)."
+          fi
+
+          echo "source_tag=$TAG" >> $GITHUB_OUTPUT
+          echo "model_asset=$MODEL_ASSET" >> $GITHUB_OUTPUT
+          [ -n "${LABELS_ASSET}" ] && echo "labels_asset=$LABELS_ASSET" >> $GITHUB_OUTPUT || true
+
+      - name: Download assets (GithubRelease)
+        id: download-rel
+        if: ${{ github.event.inputs.model-source == 'GithubRelease' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO='${{ github.repository }}'
+          MODEL_ID='${{ steps.rel.outputs.model_asset_id }}'
+          MODEL_ASSET='${{ steps.rel.outputs.model_asset_name }}'
+          LBL_ID='${{ steps.rel.outputs.labels_asset_id }}'
+          LBL_ASSET='${{ steps.rel.outputs.labels_asset_name }}'
+
+          mkdir -p bundle
+
+          echo "Downloading model asset: $MODEL_ASSET"
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+            -o "bundle/$MODEL_ASSET" \
+            "https://api.github.com/repos/${REPO}/releases/assets/${MODEL_ID}"
+
+          if [ -n "$LBL_ID" ]; then
+            echo "Downloading labels asset: $LBL_ASSET"
+            curl -sSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+              -o "bundle/$LBL_ASSET" \
+              "https://api.github.com/repos/${REPO}/releases/assets/${LBL_ID}"
+          else
+            echo "⚠️ No labels.json asset in this release (lenient)."
+          fi
+
+          echo "source_tag=${{ steps.rel.outputs.tag_name }}" >> $GITHUB_OUTPUT
+          echo "model_asset=$MODEL_ASSET" >> $GITHUB_OUTPUT
+          [ -n "$LBL_ASSET" ] && echo "labels_asset=$LBL_ASSET" >> $GITHUB_OUTPUT || true
+
+      - name: Bridge outputs
+        id: outputs-bridge
+        shell: bash
+        run: |
+          echo "source_tag=${{ steps.download-repo.outputs.source_tag || steps.download-rel.outputs.source_tag }}" >> $GITHUB_OUTPUT
+          echo "model_asset=${{ steps.download-repo.outputs.model_asset || steps.download-rel.outputs.model_asset }}" >> $GITHUB_OUTPUT
+          echo "labels_asset=${{ steps.download-repo.outputs.labels_asset || steps.download-rel.outputs.labels_asset }}" >> $GITHUB_OUTPUT
+
+      - name: Upload deployment bundle (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-bundle
+          path: |
+            bundle/${{ steps.outputs-bridge.outputs.model_asset }}
+            bundle/${{ steps.outputs-bridge.outputs.labels_asset }}
+          if-no-files-found: ignore
+
+  deliver:
+    name: Deploy to Pi
+    needs: prepare
+    runs-on: [self-hosted, app_model_cd]
+    steps:
+      - name: Clean workspace
+        if: always()
+        run: rm -rf bundle || true
+
+      - name: Download deployment bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: model-bundle
+          path: bundle
+
+      - name: Show deployment info
+        run: |
+          echo "Source repository: ${{ github.repository }}"
+          echo "Release tag used:  ${{ needs.prepare.outputs.source_tag }}"
+          echo "Pi project dir:    ${{ needs.prepare.outputs.pi_project_name }}"
+          echo "Bundle contents:"; ls -l bundle || true
+
+      - name: Ensure project structure on Pi
+        id: setup
+        shell: bash
+        run: |
+          set -e
+          PI_PROJECT="${{ needs.prepare.outputs.pi_project_name }}"
+          BASE="/opt/edge/$PI_PROJECT"
+          sudo mkdir -p "$BASE/models" "$BASE/manifests" "$BASE/tmp"
+          sudo touch "$BASE/deployments.log"
+          sudo chown -R $USER:$USER "$BASE" || true
+          sudo chmod -R 755 "$BASE"
+          echo "base=$BASE" >> $GITHUB_OUTPUT
+
+      - name: Compute new model SHA (for idempotency)
+        id: newsha
+        shell: bash
+        run: |
+          set -e
+          MODEL_FILE="$(find bundle -maxdepth 1 -type f -name '*.onnx' | head -n1)"
+          if [ -z "$MODEL_FILE" ]; then echo "❌ No .onnx in bundle"; exit 1; fi
+          SHA_NEW=$(sha256sum "$MODEL_FILE" | cut -d' ' -f1)
+          echo "sha_new=$SHA_NEW" >> $GITHUB_OUTPUT
+          echo "Model: $MODEL_FILE"
+
+      - name: Idempotency check (skip swap if same model)
+        id: idem
+        shell: bash
+        run: |
+          set -e
+          BASE="${{ steps.setup.outputs.base }}"
+          if [ -L "$BASE/current.onnx" ]; then
+            CUR="$(readlink -f "$BASE/current.onnx")"
+            if [ -f "$CUR" ]; then
+              SHA_CUR=$(sha256sum "$CUR" | cut -d' ' -f1)
+              if [ "$SHA_CUR" = "${{ steps.newsha.outputs.sha_new }}" ]; then
+                echo "skip=true" >> $GITHUB_OUTPUT
+                echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) ALREADY-CURRENT sha=$SHA_CUR tag=${{ needs.prepare.outputs.source_tag }}" >> "$BASE/deployments.log"
+                exit 0
+              fi
+            fi
+          fi
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      - name: Atomic model switch
+        if: steps.idem.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -e
+          BASE="${{ steps.setup.outputs.base }}"
+          MODEL_SRC="$(find bundle -maxdepth 1 -type f -name '*.onnx' | head -n1)"
+          NAME="$(basename "$MODEL_SRC" .onnx)"
+          FINAL="$BASE/models/${NAME}.onnx"
+
+          STAGE="$BASE/tmp/stage.$RANDOM"
+          mkdir -p "$STAGE"
+          cp "$MODEL_SRC" "$STAGE/model.onnx"
+          sudo mv "$STAGE/model.onnx" "$FINAL"
+          rmdir "$STAGE" || true
+
+          if [ -L "$BASE/current.onnx" ]; then
+            OLD="$(readlink -f "$BASE/current.onnx")"
+            [ -f "$OLD" ] && sudo ln -sfn "$OLD" "$BASE/previous.onnx"
+          fi
+          sudo ln -sfnr "$FINAL" "$BASE/current.onnx"
+
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) DEPLOY file=$(basename "$FINAL") tag=${{ needs.prepare.outputs.source_tag }}" | sudo tee -a "$BASE/deployments.log" > /dev/null
+          echo "Now current.onnx -> $(readlink -f "$BASE/current.onnx")"
+
+      - name: Install/Update labels.json (lenient)
+        shell: bash
+        run: |
+          set -e
+          BASE="${{ steps.setup.outputs.base }}"
+          LABELS_SRC="$(find bundle -maxdepth 1 -type f -name 'labels-*.json' -o -name '*.labels.json' -o -name 'labels.json' | head -n1 || true)"
+          if [ -n "$LABELS_SRC" ]; then
+            echo "Installing labels: $(basename "$LABELS_SRC")"
+            sudo cp -f "$LABELS_SRC" "$BASE/labels.json"
+            sudo chown $USER:$USER "$BASE/labels.json" || true
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) LABELS updated from release tag=${{ needs.prepare.outputs.source_tag }}" | sudo tee -a "$BASE/deployments.log" > /dev/null
+          else
+            echo "⚠️ No labels.json found in this release; continuing."
+          fi
+
+      - name: Retain last 10 models
+        if: steps.idem.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -e
+          BASE="${{ steps.setup.outputs.base }}"
+          MODELS="$BASE/models"
+          cd "$MODELS" || exit 0
+          ls -1t *.onnx > /tmp/models_all.txt 2>/dev/null || true
+          head -n 10 /tmp/models_all.txt > /tmp/keep.txt 2>/dev/null || true
+          tail -n +11 /tmp/models_all.txt > /tmp/cand_delete.txt 2>/dev/null || true
+
+          CUR="$(readlink -f "$BASE/current.onnx" 2>/dev/null || true)"
+          PREV="$(readlink -f "$BASE/previous.onnx" 2>/dev/null || true)"
+
+          while read -r f; do
+            [ -z "$f" ] && continue
+            ABS="$MODELS/$f"
+            [ "$ABS" = "$CUR" ] && { echo "Keep (current): $f"; continue; }
+            [ -n "$PREV" ] && [ "$ABS" = "$PREV" ] && { echo "Keep (previous): $f"; continue; }
+            echo "Prune: $f"
+            sudo rm -f -- "$ABS"
+          done < /tmp/cand_delete.txt
+
+      - name: Show result
+        shell: bash
+        run: |
+          BASE="${{ steps.setup.outputs.base }}"
+          echo "=== Deployment Complete ==="
+          echo "Base: $BASE"
+          echo "--- Tree ---"; ls -la "$BASE" || true
+          echo "--- Models ---"; ls -la "$BASE/models" || true
+          echo "--- Symlinks ---"; ls -la "$BASE/current.onnx" "$BASE/previous.onnx" 2>/dev/null || true
+          echo "--- Labels ---"; ls -la "$BASE/labels.json" 2>/dev/null || echo "No labels.json"
