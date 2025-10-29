@@ -27,7 +27,7 @@ import sys
 import os
 
 # Import our custom modules
-from yolo_detector_nmsTrue import YOLODetectorNMS as YOLODetector
+from yolo_detector_optimized_phase1 import YOLODetectorNMS as YOLODetector
 from coco_classes import get_class_color
 
 # Initialize GStreamer

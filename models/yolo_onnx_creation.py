@@ -23,9 +23,9 @@ from ultralytics import YOLO
 
 # Model weights to start from 
 # Change this to use different models 
-# YOLOv8n -> yolov8n.pt ,  YOLOv10n -> yolov10n.pt ,YOLOv11n -> yolo11n.pt
-
-WEIGHTS = "yolo11n.pt"
+# YOLO8n -> yolov8n.pt ,  YOLO10n -> yolov10n.pt ,YOLO11n -> yolo11n.pt
+# YOLO8s -> yolov8s.pt ,  YOLO10s -> yolov10s.pt ,YOLO11s -> yolo11s.pt
+WEIGHTS = "yolov8s.pt"
 
 # --- Load model ---------------------------------------------------------------
 # Loads Ultralytics YOLOv8n in Python (PyTorch under the hood)
