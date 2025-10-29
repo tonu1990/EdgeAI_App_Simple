@@ -89,8 +89,7 @@ try:
     yolo_detector = YOLODetector(
         model_path=MODEL_PATH,
         input_size=DETECTION_WIDTH,
-        conf_threshold=CONF_THRESHOLD,
-        nms_threshold=NMS_THRESHOLD
+        conf_threshold=CONF_THRESHOLD
     )
 except Exception as e:
     print(f"\n{'!' * 70}")
