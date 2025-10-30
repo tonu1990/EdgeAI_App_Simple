@@ -62,4 +62,4 @@ ENV QT_QPA_PLATFORM=xcb
 ENV QT_DEBUG_PLUGINS=0
 
 # STEP 8: Command to run when container starts
-CMD ["python3", "src/main.py"]
+CMD ["python3", "src/Pyside6_UI.py"]
