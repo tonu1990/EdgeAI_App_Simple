@@ -39,10 +39,8 @@ print("=" * 70)
 print(f"GStreamer version: {Gst.version_string()}")
 print("=" * 70 + "\n")
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
-
+ 
+####### CONFIGURATION #############
 # Get model path from environment variable
 MODEL_PATH = os.environ.get('MODEL_PATH', '/models/current.onnx')
 
@@ -53,16 +51,13 @@ DISPLAY_HEIGHT = 480
 FPS = 30
 
 # Detection settings
-# Detection settings
 DETECTION_WIDTH = 416       # ← match model we are using ONNX converted YOLO
 DETECTION_HEIGHT = 416      # ← match model we are using ONNX converted YOLO
-
 CONF_THRESHOLD = 0.5        # Minimum confidence (0.0-1.0)
 NMS_THRESHOLD = 0.45        # NMS IoU threshold
 
-# ==========================================
-# SHARED STATE (The "Whiteboard")
-# ==========================================
+
+######## Cairooverlay SHARED STATE (The "Whiteboard") ############
 # Detection thread WRITES, Draw callback READS
 latest_detections = []
 running = True
@@ -70,31 +65,23 @@ running = True
 # Statistics
 draw_callback_count = 0
 detection_frame_count = 0
+ 
 
-# ==========================================
-# INITIALIZE YOLO DETECTOR
-# ==========================================
-print(f"[SETUP] Model path: {MODEL_PATH}")
-
+########## INITIALIZE YOLO DETECTOR ###############
 # Check if model exists
-if not os.path.exists(MODEL_PATH):
-    print(f"\n{'!' * 70}")
-    print(f"ERROR: Model file not found at: {MODEL_PATH}")
-    print(f"Make sure you mounted the model directory correctly!")
-    print(f"{'!' * 70}\n")
+if not os.path.exists(MODEL_PATH):     
+    print(f"\nERROR: Model file not found at: {MODEL_PATH}") 
     sys.exit(1)
 
-# Create YOLO detector
+# Create YOLO detector - our custom class 
 try:
     yolo_detector = YOLODetector(
         model_path=MODEL_PATH,
         input_size=DETECTION_WIDTH,
         conf_threshold=CONF_THRESHOLD
     )
-except Exception as e:
-    print(f"\n{'!' * 70}")
-    print(f"ERROR: Failed to load YOLO model: {e}")
-    print(f"{'!' * 70}\n")
+except Exception as e:     
+    print(f"\nERROR: Failed to load YOLO model: {e}")     
     sys.exit(1)
 
 

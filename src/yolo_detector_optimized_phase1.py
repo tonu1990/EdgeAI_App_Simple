@@ -9,7 +9,6 @@ Your model format:
 - Output: [1, 300, 6] - NMS already applied
 - Each detection: [x1, y1, x2, y2, confidence, class_id]
 
-BEGINNER NOTE:
 This detector is simpler because the model already did the hard work (NMS).
 We just need to:
 1. Preprocess frames (normalize)
@@ -26,9 +25,7 @@ from coco_classes import COCO_CLASSES, get_class_name
 class YOLODetectorNMS:
     """
     YOLO Object Detector for NMS-Baked Models (nms=True)
-    
-    Simplified detector for models that have NMS built-in.
-    Much faster and simpler than standard YOLO post-processing!
+
     """
     
     def __init__(self, model_path, input_size=416, conf_threshold=0.5):
@@ -40,9 +37,6 @@ class YOLODetectorNMS:
             input_size (int): Model input size (must match export: 416)
             conf_threshold (float): Confidence threshold (0.0-1.0)
         """
-        print("\n" + "=" * 60)
-        print("YOLO DETECTOR (NMS-BAKED MODEL)")
-        print("=" * 60)
         
         # Store configuration
         self.model_path = model_path
@@ -57,13 +51,7 @@ class YOLODetectorNMS:
         # Pre-allocate input array for faster preprocessing
         # Shape: (1, 3, input_size, input_size)
         self.input_array = np.zeros((1, 3, input_size, input_size), dtype=np.float32)
-        
-        print(f"Configuration:")
-        print(f"  Model path: {model_path}")
-        print(f"  Input size: {input_size}x{input_size}")
-        print(f"  Confidence threshold: {conf_threshold}")
-        print(f"  Model type: NMS-baked (nms=True)")
-        
+
         # Load the model
         self.load_model()
     
@@ -71,33 +59,33 @@ class YOLODetectorNMS:
     def load_model(self):
         """
         Load the ONNX model and validate it
+
         """
-        print(f"\n[LOADING MODEL]")
-        
-        # Check if model file exists
-        if not os.path.exists(self.model_path):
-            raise FileNotFoundError(f"Model file not found: {self.model_path}")
-        
-        print(f"  ✓ Model file exists")
-        
+       
         # Create ONNX Runtime session with optimizations
         session_options = ort.SessionOptions()
         
         # Enable all graph optimizations
-        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+
+        # Execution Mode -Execute operations one after another-better for CPU-only devices
+        session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         
         # Use all CPU cores (Raspberry Pi 5 has 4 cores)
         session_options.intra_op_num_threads = 4
-        session_options.inter_op_num_threads = 4
+        session_options.inter_op_num_threads = 1
+
+        # Only show WARNING and ERROR messages
+        session_options.log_severity_level = 2 # WARNING and above only
         
-        print(f"  Loading model with ONNX Runtime...")
+        print(f" Loading model with ONNX Runtime...")
         
         try:
             # Create the inference session
             self.session = ort.InferenceSession(
                 self.model_path,
                 sess_options=session_options,
-                providers=['CPUExecutionProvider']
+                providers=['CPUExecutionProvider'] # CPU-only (no GPU on Pi)
             )
             print(f"  ✓ Model loaded successfully")
         
@@ -107,7 +95,7 @@ class YOLODetectorNMS:
         # Get input and output names
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name
-        
+
         # Get shapes
         input_shape = self.session.get_inputs()[0].shape
         output_shape = self.session.get_outputs()[0].shape
@@ -126,13 +114,31 @@ class YOLODetectorNMS:
         else:
             print(f"  ✓ Output format confirmed: [1, {output_shape[1]}, 6] (NMS-baked)")
         
-        print(f"  Number of classes: {len(COCO_CLASSES)}")
-        
-        print("\n" + "=" * 60)
+        print(f"  Number of classes: {len(COCO_CLASSES)}")        
         print("YOLO DETECTOR READY!")
-        print("=" * 60 + "\n")
-    
-    
+
+        # Model warm up
+        self.warm_up()
+        print(f"  ✓ Model warmed up and ready!")
+        print(f"  (First real inference will be fast)")
+ 
+    def warm_up(self):
+        print(f"\n[WARM-UP]")
+        print(f"  Running 3 warm-up inferences...")
+        print(f"  (This eliminates first-frame lag)")
+        
+        # Create dummy input (zeros) matching model input shape
+        # use already created self.input_array 
+               
+        # Run 3 dummy inferences
+        for i in range(5):
+            _ = self.session.run(
+                [self.output_name],
+                {self.input_name: self.input_array}
+            )        
+
+   
+ 
     def preprocess(self, frame):
         """
         Preprocess a frame for YOLO inference
@@ -260,21 +266,3 @@ class YOLODetectorNMS:
         detections = self.postprocess(predictions)
         
         return detections
-    
-    
-    def get_stats(self):
-        """
-        Get detector statistics and info
-        
-        Returns:
-            dict: Detector information
-        """
-        return {
-            'model_path': self.model_path,
-            'input_size': self.input_size,
-            'conf_threshold': self.conf_threshold,
-            'model_type': 'NMS-baked (nms=True)',
-            'num_classes': len(COCO_CLASSES),
-            'input_shape': self.session.get_inputs()[0].shape,
-            'output_shape': self.session.get_outputs()[0].shape
-        }
