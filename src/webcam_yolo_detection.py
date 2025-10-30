@@ -28,7 +28,6 @@ import os
 
 # Import our custom modules
 from yolo_detector_optimized_phase1 import YOLODetectorNMS as YOLODetector
-from coco_classes import get_class_color
 
 # Initialize GStreamer
 Gst.init(None)
@@ -54,7 +53,6 @@ FPS = 30
 DETECTION_WIDTH = 416       # ← match model we are using ONNX converted YOLO
 DETECTION_HEIGHT = 416      # ← match model we are using ONNX converted YOLO
 CONF_THRESHOLD = 0.5        # Minimum confidence (0.0-1.0)
-NMS_THRESHOLD = 0.45        # NMS IoU threshold
 
 
 ######## Cairooverlay SHARED STATE (The "Whiteboard") ############
@@ -84,22 +82,20 @@ except Exception as e:
     print(f"\nERROR: Failed to load YOLO model: {e}")     
     sys.exit(1)
 
-
-# ==========================================
+ 
 # BUS MESSAGE HANDLER
-# ==========================================
 def on_bus_message(bus, message):
     """
     Handle GStreamer bus messages (errors, warnings, etc.)
     """
+    global running, main_loop
     t = message.type
     
     if t == Gst.MessageType.ERROR:
         err, debug = message.parse_error()
-        print(f"\n{'!' * 70}")
         print(f"GSTREAMER ERROR: {err}")
-        print(f"DEBUG INFO: {debug}")
-        print(f"{'!' * 70}\n")
+        print(f"DEBUG INFO: {debug}") 
+        running = False
         main_loop.quit()
     
     elif t == Gst.MessageType.WARNING:
@@ -113,6 +109,7 @@ def on_bus_message(bus, message):
     
     elif t == Gst.MessageType.EOS:
         print("[BUS] End of stream")
+        running = False
         main_loop.quit()
     
     return True
@@ -126,24 +123,10 @@ def on_draw(overlay, context, timestamp, duration):
     Draw callback - called by CairoOverlay for EACH frame (30 FPS)
     
     This is where we draw the bounding boxes on the video!
-    
-    Args:
-        overlay: The cairooverlay element
-        context: Cairo drawing context (like a canvas)
-        timestamp: Frame timestamp
-        duration: Frame duration
+ 
     """
     global draw_callback_count
-    draw_callback_count += 1
-    
-    # Log first few frames
-    if draw_callback_count <= 3:
-        print(f"[DRAW] Frame {draw_callback_count}")
-    elif draw_callback_count == 4:
-        print("[DRAW] Drawing continuously (will report every 100 frames)...")
-    
-    if draw_callback_count % 100 == 0:
-        print(f"[DRAW] Frame {draw_callback_count}, {len(latest_detections)} objects")
+    draw_callback_count += 1    
     
     # Read from shared variable (the "whiteboard")
     detections = latest_detections
@@ -162,11 +145,7 @@ def on_draw(overlay, context, timestamp, duration):
         class_name = detection['class_name']
         confidence = detection['confidence']
         
-        # Get color for this class
-        color = get_class_color(class_name)
-        
-        # STEP 1: Draw bounding box
-        context.set_source_rgb(color[0], color[1], color[2])  # Set color
+        # STEP 1: Draw bounding box 
         context.set_line_width(2)                              # Line thickness
         context.rectangle(x, y, w, h)                          # Draw rectangle
         context.stroke()                                       # Actually draw it
@@ -174,10 +153,8 @@ def on_draw(overlay, context, timestamp, duration):
         # STEP 2: Draw label background (filled rectangle)
         label = f"{class_name}: {confidence:.2f}"
         label_height = 20
-        label_width = len(label) * 8
-        
-        # Make background slightly darker
-        context.set_source_rgba(color[0] * 0.7, color[1] * 0.7, color[2] * 0.7, 0.8)
+        label_width = len(label) * 8        
+        # Make background slightly darker 
         context.rectangle(x, y - label_height, label_width, label_height)
         context.fill()
         
@@ -205,7 +182,6 @@ def detection_loop():
     """
     global latest_detections, running, detection_frame_count
     
-    print("\n[DETECTION THREAD] Started!")
     print(f"[DETECTION THREAD] Processing at {DETECTION_WIDTH}x{DETECTION_HEIGHT}")
     print(f"[DETECTION THREAD] Confidence threshold: {CONF_THRESHOLD}\n")
     
@@ -238,20 +214,15 @@ def detection_loop():
                 dtype=np.uint8,
                 buffer=map_info.data
             )
-            
-            # Clean up buffer
-            buffer.unmap(map_info)
-            
+                       
             detection_frame_count += 1
             
-            # Log first few frames
-            if detection_frame_count <= 3:
-                print(f"[DETECTION] Processing frame {detection_frame_count}")
-            elif detection_frame_count == 4:
-                print("[DETECTION] Processing continuously...\n")
-            
-            # STEP 2: Run YOLO detection
+            ################# STEP 2: RUN YOLO DETECTION ###############
             detections = yolo_detector.detect(frame)
+            ############################################################
+
+            # Clean up buffer
+            buffer.unmap(map_info)
             
             # STEP 3: Scale coordinates to display size
             scaled_detections = []
@@ -271,13 +242,7 @@ def detection_loop():
             # STEP 4: Update shared variable (write to "whiteboard")
             latest_detections = scaled_detections
             
-            # Log detections periodically
-            if detection_frame_count % 50 == 0:
-                print(f"[DETECTION] Frame {detection_frame_count}: {len(detections)} objects detected")
-                if detections:
-                    for det in detections[:3]:  # Show first 3
-                        print(f"  - {det['class_name']}: {det['confidence']:.2f}")
-        
+       
         except Exception as e:
             print(f"[DETECTION] Error: {e}")
             time.sleep(0.1)
@@ -285,7 +250,6 @@ def detection_loop():
     print("[DETECTION THREAD] Exiting")
 
 
-# ==========================================
 # MAIN FUNCTION
 # ==========================================
 def main():
@@ -296,7 +260,7 @@ def main():
     
     print("\n[MAIN] Building GStreamer pipeline...")
     
-    # ==========================================
+ 
     # BUILD GSTREAMER PIPELINE
     # ==========================================
     # Note: Two branches with proper format handling for cairooverlay
@@ -316,25 +280,21 @@ def main():
         "tee name=t "
         
         # PATH 1: DISPLAY BRANCH (30 FPS, smooth)
-        "t. ! queue ! "
+        "t. ! queue max-size-buffers=1 leaky=downstream ! " #prevents buildup if one branch hiccups 
         "videoconvert ! "                    # Let cairooverlay negotiate format
         "cairooverlay name=overlay ! "       # Drawing happens here
         "videoconvert ! "                    # Convert for display
         "xvimagesink sync=false "
         
         # PATH 2: DETECTION BRANCH (416x416 for YOLO)
-        "t. ! queue ! "
+        "t. ! queue max-size-buffers=1 leaky=downstream ! "
         "videoconvert ! "
         "videoscale ! "
         f"video/x-raw,format=RGB,width={DETECTION_WIDTH},height={DETECTION_HEIGHT} ! "
         "appsink name=sink emit-signals=True max-buffers=1 drop=True"
     )
     
-    print(f"\n[PIPELINE] Configuration:")
-    print(f"  Display: {DISPLAY_WIDTH}x{DISPLAY_HEIGHT} @ {FPS} FPS")
-    print(f"  Detection: {DETECTION_WIDTH}x{DETECTION_HEIGHT}")
-    print(f"  Camera: {CAMERA_DEVICE}\n")
-    
+   
     # Create pipeline
     try:
         pipeline = Gst.parse_launch(pipeline_str)
@@ -343,63 +303,35 @@ def main():
         print(f"[PIPELINE] ERROR: Failed to create pipeline: {e}\n")
         return
     
-    # ==========================================
     # GET PIPELINE ELEMENTS
-    # ==========================================
     overlay = pipeline.get_by_name('overlay')
     appsink = pipeline.get_by_name('sink')
     
     if not overlay or not appsink:
         print("[PIPELINE] ERROR: Could not get pipeline elements\n")
-        return
+        return    
+    print("Got overlay and appsink elements")
     
-    print("[PIPELINE] ✓ Got overlay and appsink elements")
-    
-    # ==========================================
+
     # CONNECT CALLBACKS
-    # ==========================================
     # Connect draw callback to cairooverlay
     overlay.connect('draw', on_draw)
-    print("[PIPELINE] ✓ Connected draw callback\n")
+    print("Connected draw callback\n")
+       
     
-    # ==========================================
-    # SET UP BUS
-    # ==========================================
-    bus = pipeline.get_bus()
-    bus.add_signal_watch()
-    bus.connect('message', on_bus_message)
-    print("[PIPELINE] ✓ Bus message handler connected\n")
-    
-    # ==========================================
-    # START DETECTION THREAD
-    # ==========================================
+    ##### START DETECTION THREAD ########
     detection_thread = threading.Thread(target=detection_loop, daemon=True)
     detection_thread.start()
-    print("[MAIN] ✓ Detection thread started\n")
+    print("Detection thread started\n")
     
-    # ==========================================
-    # START PIPELINE
-    # ==========================================
+ 
+    ######### START PIPELINE  #############
     print("[MAIN] Starting pipeline...\n")
     ret = pipeline.set_state(Gst.State.PLAYING)
     
     if ret == Gst.StateChangeReturn.FAILURE:
         print("[MAIN] ERROR: Could not start pipeline\n")
         return
-    
-    print("=" * 70)
-    print("SYSTEM RUNNING!")
-    print("=" * 70)
-    print("What you should see:")
-    print("  ✓ Webcam window opens")
-    print("  ✓ Objects detected with bounding boxes")
-    print("  ✓ Class labels (person, car, etc.)")
-    print("  ✓ Confidence scores")
-    print("\nPerformance:")
-    print(f"  Display: 30 FPS (smooth)")
-    print(f"  Detection: ~20 FPS (YOLO inference)")
-    print("\nPress Ctrl+C to stop")
-    print("=" * 70 + "\n")
     
     # Give pipeline time to start
     time.sleep(3)
@@ -415,10 +347,14 @@ def main():
     if detection_frame_count == 0:
         print("  ⚠ WARNING: Detection not running!\n")
     
-    # ==========================================
-    # RUN MAIN LOOP
-    # ==========================================
+    ######## RUN MAIN LOOP ##################
     main_loop = GLib.MainLoop()
+
+    # SET UP BUS
+    bus = pipeline.get_bus()
+    bus.add_signal_watch()
+    bus.connect('message', on_bus_message)
+    print("Bus message handler connected\n")
     
     try:
         main_loop.run()
@@ -426,22 +362,13 @@ def main():
         print("\n\n[MAIN] Stopping...\n")
         running = False
     
-    # ==========================================
-    # CLEANUP
-    # ==========================================
-    print("[MAIN] Final statistics:")
-    print(f"  Total frames drawn: {draw_callback_count}")
-    print(f"  Total frames detected: {detection_frame_count}\n")
-    
+  
+    # CLEANUP    
     pipeline.set_state(Gst.State.NULL)
     print("[MAIN] ✓ Pipeline stopped")
     
     detection_thread.join(timeout=2)
-    print("[MAIN] ✓ Detection thread stopped\n")
-    
-    print("=" * 70)
-    print("SHUTDOWN COMPLETE")
-    print("=" * 70 + "\n")
+    print(" Detection thread stopped\n")
 
 
 # ==========================================
