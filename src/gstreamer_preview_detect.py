@@ -193,7 +193,9 @@ class GStreamerPreviewDetect:
             label_h = 20
             label_w = len(label) * 8
             label_y = y - label_h if (y - label_h) >= 0 else y + label_h
-
+            
+            # Semi-transparent black background so video stays visible under text
+            context.set_source_rgba(0, 0, 0, 0.6)
             context.rectangle(x, label_y, label_w, label_h)
             context.fill()
 
